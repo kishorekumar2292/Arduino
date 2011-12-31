@@ -254,7 +254,7 @@ void monoblockPumpCheck() {
      *    TANK > 0 AND TANK < 100
      *      SWITCH PUMP ON!
      */
-    if(sump != -1 && sump < sensor.getWaterLevel(SUMP) && P1 == LOW && sensor.getWaterLevel(OHT1) > LVL25 && sensor.getWaterLevel(OHT1) < LVLHI) {
+    if(sump != -1 && sump > LVL25 && sump < sensor.getWaterLevel(SUMP) && P1 == LOW && sensor.getWaterLevel(OHT1) > LVL25 && sensor.getWaterLevel(OHT1) < LVLHI) {
       P1Error = false;
       p1blinkAction.disable();
       monoblockPumpOn();
