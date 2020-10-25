@@ -24,7 +24,13 @@ String RealTimeClock::getDateStr(DateTime time) {
 }
 
 String RealTimeClock::getTimeStr(DateTime time) {
-  String _tsStr = String(String(time.hour()>12?time.hour()-12:time.hour(),DEC) + ":" + String(time.minute(),DEC) + String(time.hour()<13?"am":"pm") + "");
+  int hour = time.hour();
+  int minute = time.minute();
+  String ampm = hour < 12 ? String("am") : String("pm");
+  hour = hour > 12 ? hour - 12 : hour;
+  String hr = hour < 10 ? String("0" + String(hour,DEC)) : String(hour,DEC);
+  String mm = minute < 10 ? String("0" + String(minute,DEC)) : String(minute,DEC);
+  String _tsStr = String(hr + ":" + mm + ampm);
   return _tsStr;
 }
 

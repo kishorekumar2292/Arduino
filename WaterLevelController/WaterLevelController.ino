@@ -49,26 +49,20 @@ void getSerialData() {
     
     switch(indata) {
       case '1':
-        Serial.print("Current date/time is "); 
-        Serial.print(rtc.getDateStr(rtc.getCurrentTime()));
-        Serial.print(" ");
-        Serial.print(rtc.getTimeStr(rtc.getCurrentTime()));
+        Serial.print(rtc.getTimeStampStr(rtc.getCurrentTime()));
         Serial.print(", ");
         Serial.print(rtc.getDayOfWeek());
         Serial.print(" | ");
         Serial.print(rtc.getTemperature());
         Serial.println(" ^c");
-        Serial.println(rtc.getTimeStampStr(rtc.getCurrentTime()));
         Serial.println("");
         break;
       case '2':
-        Serial.println("Cauvery water sump, tank & pump status");
         Serial.println(String("Sump:" + String(sump) + "% | Tank:" + String(tank1) + "%"));
         Serial.println(String("Pump Mode:" + String(P1Auto ? "Auto" : "Manual") + " | Pump Status:" + String(P1 == HIGH ? "ON" : "OFF")));
         Serial.println("");
         break;
       case '3':
-        Serial.println("Bore water tank & pump status");
         Serial.println(String("Tank:" + String(tank2) + "%"));
         Serial.println(String("Pump Mode:" + String(P2Auto ? "Auto" : "Manual") + " | Pump Status:" + String(P2 == HIGH ? "ON" : "OFF")));
         Serial.println("");
@@ -308,24 +302,28 @@ void submersiblePumpCheck() {
     }
   }
 }
-void monoblockPumpMode() {
-  if(!P1Auto) {
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("PUMP1->MANUAL");
+void monoblockPumpStatus() {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print(" Monoblock Pump ");
+  for(int i=0; i<10; i++) {
     lcd.setCursor(0,1);
-    lcd.print("Touch SW1->AUTO");
-    customDelayHandle(2000);
+    lcd.print(String("Pump:" + String(P1==HIGH?"ON  ":"OFF")));
+    lcd.setCursor(10,1);
+    lcd.print(String("Mode:" + String(P1Auto?"A":"M")));
+    customDelayHandle(300);
   }
 }
-void submersiblePumpMode() {
-  if(!P2Auto) {
-    lcd.clear();
-    lcd.setCursor(0,0);
-    lcd.print("PUMP2->MANUAL");
+void submersiblePumpStatus() {
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Submersible Pump");
+  for(int i=0; i<10; i++) {
     lcd.setCursor(0,1);
-    lcd.print("Touch SW2->AUTO");
-    customDelayHandle(2000);
+    lcd.print(String("Pump:" + String(P2==HIGH?"ON  ":"OFF")));
+    lcd.setCursor(10,1);
+    lcd.print(String("Mode:" +String(P2Auto?"A":"M")));
+    customDelayHandle(300);
   }
 }
 
@@ -349,10 +347,10 @@ void setup() {
 
 void loop() {
   displayDateTimeTemp();
+  cauveryWaterStatus();
   monoblockPumpStatus();
+  boreWaterStatus();  
   submersiblePumpStatus();
-  monoblockPumpMode();
-  submersiblePumpMode();
 }
 
 void customDelayHandle(long duration) {
@@ -377,12 +375,13 @@ void initLCD() {
 
 void displayDateTimeTemp() {
   lcd.clear();
+  DateTime now = rtc.getCurrentTime();
   lcd.setCursor(0,0);
-  lcd.print(rtc.getDateStr(rtc.getCurrentTime()));
+  lcd.print(rtc.getDateStr(now));
   lcd.setCursor(13,0);
   lcd.print(rtc.getDayOfWeek());
   lcd.setCursor(0,1);
-  lcd.print(rtc.getTimeStr(rtc.getCurrentTime()));
+  lcd.print(rtc.getTimeStr(now));
   lcd.setCursor(10,1);
   lcd.print(rtc.getTemperature());
   lcd.setCursor(14,1);
@@ -395,62 +394,49 @@ void displayDateTimeTemp() {
  * Monoblock Pump
  * Cauvery water
  */
-void monoblockPumpStatus() {
+void cauveryWaterStatus() {
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("  Cauvery Water ");
-  lcd.setCursor(0,1);
-  lcd.print(" Monoblock Pump ");
-  customDelayHandle(2000);
   /*Read sensor values*/
   sump = sensor.getWaterLevel(SUMP);
   tank1 = sensor.getWaterLevel(OHT1);
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("SUMP  TANK  PUMP");
-  lcd.setCursor(0,1);  lcd.print(sump);
-  lcd.setCursor(3,1);  lcd.print("%");
-  lcd.setCursor(6,1);  lcd.print(tank1);
-  lcd.setCursor(9,1);  lcd.print("%");
-  for(int i=0; i<100; i++) {
-    lcd.setCursor(12,1);
-    lcd.print(P1==HIGH?"ON  ":"OFF");
-    customDelayHandle(30);
-  }
+  lcd.setCursor(1,1);  lcd.print(String("S:" + String(sump,DEC) + "%"));
+  lcd.setCursor(9,1);  lcd.print(String("T:" + String(tank1,DEC) + "%"));
+  customDelayHandle(2500);
 }
 /**
  * Submersible Pump
  * Bore Water
  */
-void submersiblePumpStatus() {
+void boreWaterStatus() {
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("   Bore Water  ");
-  lcd.setCursor(0,1);
-  lcd.print("Submersible Pump");
-  customDelayHandle(2000);
   /*Read sensor values*/
   tank2 = sensor.getWaterLevel(OHT2);
-  lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("TANK    UG PUMP");
-  lcd.setCursor(0,1);  lcd.print(tank2);
-  lcd.setCursor(3,1);  lcd.print("%");
-  for(int i=0; i<100; i++) {
-    lcd.setCursor(9,1);
-    lcd.print(P2==HIGH?"ON  ":"OFF");
-    customDelayHandle(30);
-  }
+  lcd.setCursor(4,1);  lcd.print(String("Tank:" + String(tank2,DEC) + "%"));
+  customDelayHandle(2500);
 }
 
 void parseBTCommand(String command) {
-  if(command == "pump1=?") {
-    BlueTooth.print("PUMP1=" + String(P1==HIGH?"ON":"OFF") + "\r");
+  if(command == "ping") {
+    BlueTooth.print("OK\r");
+  }
+  else if(command == "sump") {
+    BlueTooth.print(String("Sump=" + String(sump,DEC) + "\r"));
+  }
+  else if(command == "tank1") {
+    BlueTooth.print(String("Tank1=" + String(tank1,DEC) + "\r"));
+  }
+  else if(command == "tank2") {
+    BlueTooth.print(String("Tank2=" + String(tank2,DEC) + "\r"));
+  }
+  else if(command == "pump1=?") {
+    BlueTooth.print("PUMP1=" + String(P1==HIGH?"ON":"OFF") + ",MODE=" + String(P1Auto?"Auto":"Manual") + "\r");
   }
   else if(command == "pump1TS") {
-    String _startts = rtc.getTimeStampStr(P1StartTS);
-    String _stopts = rtc.getTimeStampStr(P1StopTS);
-    BlueTooth.print("P1StartTS=" + _startts + ",P1StopTS=" + _stopts + "\r");
+    BlueTooth.print("P1StartTS=" + rtc.getTimeStampStr(P1StartTS) + ",P1StopTS=" + rtc.getTimeStampStr(P1StopTS) + "\r");
   }
   else if(command == "pump1=on") {
     BTRESCODE = "";
@@ -471,12 +457,10 @@ void parseBTCommand(String command) {
     BlueTooth.print("\r");
   }
   else if(command == "pump2=?") {
-    BlueTooth.print("PUMP2=" + String(P2==HIGH?"ON":"OFF") + "\r");
+    BlueTooth.print("PUMP2=" + String(P2==HIGH?"ON":"OFF") + ",MODE=" + String(P2Auto?"Auto":"Manual") + "\r");
   }
   else if(command == "pump2TS") {
-    String _startts = rtc.getTimeStampStr(P2StartTS);
-    String _stopts = rtc.getTimeStampStr(P2StopTS);
-    BlueTooth.print("P2StartTS=" + _startts + ",P2StopTS=" + _stopts + "\r");
+    BlueTooth.print("P2StartTS=" + rtc.getTimeStampStr(P2StartTS) + ",P2StopTS=" + rtc.getTimeStampStr(P2StopTS) + "\r");
   }
   else if(command == "pump2=on") {
     BTRESCODE = "";
