@@ -27,30 +27,12 @@ class LiquidLevelSensor {
      * Reads analog value of sensor attached to the unit
      * and returns a value with 10 bit precision
      */
-    int readWaterLevelSensor(int unit) {
-      int value = 0;
-      if(unit == SUMP || unit == OHT1 ||unit == OHT2)
-        value = analogRead(unit);
-      return value;
-    }
-
+    int readWaterLevelSensor(int unit);
     /**
      * Reads the sensor output and converts it to
      * appropriate level indicator value
      */
-    int getWaterLevel(int unit) {
-      int analogVal = readWaterLevelSensor(unit);
-      if(analogVal == 0)
-        return LVLLO;
-      if(analogVal >= 100 && analogVal < 250)
-        return LVL25;
-      if(analogVal >= 250 && analogVal < 350)
-        return LVL50;
-      if(analogVal >= 350 && analogVal < 450)
-        return LVL75;
-      if(analogVal >= 450)
-        return LVLHI;
-    }
+    int getWaterLevel(int unit);
 };
 
 #endif

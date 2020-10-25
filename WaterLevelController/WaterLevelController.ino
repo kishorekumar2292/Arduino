@@ -15,7 +15,7 @@ SoftwareSerial BlueTooth(4, 5);
 LiquidLevelSensor sensor;
 TouchSwitch touchswitch;
 RealTimeClock rtc;
-PumpRelay relay;
+PumpRelay relay(10, 9, 8); //RA, RB1, RB2
 
 volatile byte P1 = LOW, P2 = LOW;
 DateTime P1Start, P1Stop, P2Start, P2Stop;
