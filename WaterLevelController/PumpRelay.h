@@ -12,15 +12,16 @@
 
 #include <Arduino.h>
 
+#define RELAYA 10
+#define RELAYB1 9
+#define RELAYB2 8
+
 class PumpRelay {
-  private:
-    int RELAYA;
-    int RELAYB1, RELAYB2;
   public:
     /**
      * Initializes the pins as digital output
      */
-    PumpRelay(int rA, int rB1, int rB2);
+    PumpRelay();
     /**
      * Switches both relays to ON initailly and 
      * cuts of starter capacitor after 1s

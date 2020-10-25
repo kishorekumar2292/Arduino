@@ -4,6 +4,7 @@
 #include "LiquidLevelSensor.h"
 #include "AdminConsole.h"
 #include "Themes.h"
+#include "DS3231.h"
 
 #include <TimedAction.h>
 #include <LiquidCrystal_I2C.h>
@@ -15,10 +16,10 @@ SoftwareSerial BlueTooth(4, 5);
 LiquidLevelSensor sensor;
 TouchSwitch touchswitch;
 RealTimeClock rtc;
-PumpRelay relay(10, 9, 8); //RA, RB1, RB2
+PumpRelay relay;
 
 volatile byte P1 = LOW, P2 = LOW;
-DateTime P1Start, P1Stop, P2Start, P2Stop;
+DateTime P1StartTS, P2StartTS, P1StopTS, P2StopTS;
 volatile boolean P1Auto = true, P2Auto = true;
 volatile int sump, tank1, tank2;
 String btcommand, BTRESCODE="";
@@ -49,14 +50,15 @@ void getSerialData() {
     switch(indata) {
       case '1':
         Serial.print("Current date/time is "); 
-        Serial.print(rtc.getDate(rtc.getCurrentTime()));
+        Serial.print(rtc.getDateStr(rtc.getCurrentTime()));
         Serial.print(" ");
-        Serial.print(rtc.getTime(rtc.getCurrentTime()));
+        Serial.print(rtc.getTimeStr(rtc.getCurrentTime()));
         Serial.print(", ");
         Serial.print(rtc.getDayOfWeek());
         Serial.print(" | ");
         Serial.print(rtc.getTemperature());
         Serial.println(" ^c");
+        Serial.println(rtc.getTimeStampStr(rtc.getCurrentTime()));
         Serial.println("");
         break;
       case '2':
@@ -100,7 +102,7 @@ void monoblockPumpCheck() {
    */
   if(P1 == HIGH && (tank1 >= LVLHI || sump <= LVLLO)) {
     relay.monoblockPumpOff();
-    P1Stop = rtc.getCurrentTime();
+    P1StopTS = rtc.getCurrentTime();
     P1Auto = true;
     P1 = LOW;
     touchswitch.setSwitch1(LOW);
@@ -117,7 +119,7 @@ void monoblockPumpCheck() {
      */
     if(tank1 <= LVL50 && P1 == LOW && sump > LVLLO) {
       relay.monoblockPumpOn();
-      P1Start = rtc.getCurrentTime();
+      P1StartTS = rtc.getCurrentTime();
       P1 = HIGH;
       touchswitch.setSwitch1(HIGH);
     }
@@ -129,7 +131,7 @@ void monoblockPumpCheck() {
      */
     if(P1 == HIGH && touchswitch.getSwitchState(SW1) == LOW) {
       relay.monoblockPumpOff();
-      P1Stop = rtc.getCurrentTime();
+      P1StopTS = rtc.getCurrentTime();
       P1Auto = false;
       P1 = LOW;
       touchswitch.setSwitch1(LOW);
@@ -144,7 +146,7 @@ void monoblockPumpCheck() {
     if(P1 == LOW && touchswitch.getSwitchState(SW1) == HIGH) {
       if(sump > LVLLO && tank1 < LVLHI) {
         relay.monoblockPumpOn();
-        P1Start = rtc.getCurrentTime();
+        P1StartTS = rtc.getCurrentTime();
         P1 = HIGH;
         touchswitch.setSwitch1(HIGH);
         P1Auto = false;
@@ -183,7 +185,7 @@ void monoblockPumpCheck() {
      */
     if(P1 == LOW && touchswitch.getSwitchState(SW1) == HIGH) {
       relay.monoblockPumpOn();
-      P1Start = rtc.getCurrentTime();
+      P1StartTS = rtc.getCurrentTime();
       P1 = HIGH;
       touchswitch.setSwitch1(HIGH);
       P1Auto = true;
@@ -191,7 +193,7 @@ void monoblockPumpCheck() {
     }
     if(P1 == HIGH && touchswitch.getSwitchState(SW1) == LOW) {
       relay.monoblockPumpOff();
-      P1Start = rtc.getCurrentTime();
+      P1StartTS = rtc.getCurrentTime();
       P1 = LOW;
       touchswitch.setSwitch1(LOW);
       P1Auto = true;
@@ -211,7 +213,7 @@ void submersiblePumpCheck() {
    */
   if(tank2 >= LVLHI && P2 == HIGH) {
     relay.submersiblePumpOff();
-    P2Stop = rtc.getCurrentTime();
+    P2StopTS = rtc.getCurrentTime();
     P2Auto = true;
     P2 = LOW;
     touchswitch.setSwitch2(LOW);
@@ -228,7 +230,7 @@ void submersiblePumpCheck() {
      */
     if(tank2 <= LVL50 && P2 == LOW) {
       relay.submersiblePumpOn();
-      P2Start = rtc.getCurrentTime();
+      P2StartTS = rtc.getCurrentTime();
       P2 = HIGH;
       touchswitch.setSwitch2(HIGH);
     }
@@ -240,7 +242,7 @@ void submersiblePumpCheck() {
      */
     if(P2 == HIGH && touchswitch.getSwitchState(SW2) == LOW) {
       relay.submersiblePumpOff();
-      P2Stop = rtc.getCurrentTime();
+      P2StopTS = rtc.getCurrentTime();
       P2Auto = false;
       P2 = LOW;
       touchswitch.setSwitch2(LOW);
@@ -255,7 +257,7 @@ void submersiblePumpCheck() {
     if(P2 == LOW && touchswitch.getSwitchState(SW2) == HIGH) {
       if(tank2 < LVLHI) {
         relay.submersiblePumpOn();
-        P2Stop = rtc.getCurrentTime();
+        P2StopTS = rtc.getCurrentTime();
         P2Auto = false;
         P2 = HIGH;
         touchswitch.setSwitch2(HIGH);
@@ -285,7 +287,7 @@ void submersiblePumpCheck() {
      */
     if(P2 == LOW && touchswitch.getSwitchState(SW2) == HIGH) {
       relay.submersiblePumpOn();
-      P2Start = rtc.getCurrentTime();
+      P2StartTS = rtc.getCurrentTime();
       P2 = HIGH;
       touchswitch.setSwitch2(HIGH);
       P2Auto = true;
@@ -298,7 +300,7 @@ void submersiblePumpCheck() {
      */
     if(P2 == HIGH && touchswitch.getSwitchState(SW2) == LOW) {
       relay.submersiblePumpOff();
-      P2Start = rtc.getCurrentTime();
+      P2StartTS = rtc.getCurrentTime();
       P2 = LOW;
       touchswitch.setSwitch2(LOW);
       P2Auto = true;
@@ -341,6 +343,8 @@ void setup() {
   while(!Serial) {}
   /*Initializes LCD and display WELCOME message*/
   initLCD();
+
+  P1StartTS = P1StopTS = P2StartTS = P2StopTS = rtc.getCurrentTime();
 }
 
 void loop() {
@@ -374,11 +378,11 @@ void initLCD() {
 void displayDateTimeTemp() {
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print(rtc.getDate(rtc.getCurrentTime()));
+  lcd.print(rtc.getDateStr(rtc.getCurrentTime()));
   lcd.setCursor(13,0);
   lcd.print(rtc.getDayOfWeek());
   lcd.setCursor(0,1);
-  lcd.print(rtc.getTime(rtc.getCurrentTime()));
+  lcd.print(rtc.getTimeStr(rtc.getCurrentTime()));
   lcd.setCursor(10,1);
   lcd.print(rtc.getTemperature());
   lcd.setCursor(14,1);
@@ -441,7 +445,12 @@ void submersiblePumpStatus() {
 
 void parseBTCommand(String command) {
   if(command == "pump1=?") {
-    BlueTooth.print(String("pump1=" + String(P1==HIGH?"on":"off") + "\r"));
+    BlueTooth.print("PUMP1=" + String(P1==HIGH?"ON":"OFF") + "\r");
+  }
+  else if(command == "pump1TS") {
+    String _startts = rtc.getTimeStampStr(P1StartTS);
+    String _stopts = rtc.getTimeStampStr(P1StopTS);
+    BlueTooth.print("P1StartTS=" + _startts + ",P1StopTS=" + _stopts + "\r");
   }
   else if(command == "pump1=on") {
     BTRESCODE = "";
@@ -462,8 +471,13 @@ void parseBTCommand(String command) {
     BlueTooth.print("\r");
   }
   else if(command == "pump2=?") {
-    BlueTooth.print(String("pump2=" + String(P2==HIGH?"on":"off") + "\r"));
-  }  
+    BlueTooth.print("PUMP2=" + String(P2==HIGH?"ON":"OFF") + "\r");
+  }
+  else if(command == "pump2TS") {
+    String _startts = rtc.getTimeStampStr(P2StartTS);
+    String _stopts = rtc.getTimeStampStr(P2StopTS);
+    BlueTooth.print("P2StartTS=" + _startts + ",P2StopTS=" + _stopts + "\r");
+  }
   else if(command == "pump2=on") {
     BTRESCODE = "";
     touchswitch.setSwitch2(HIGH);

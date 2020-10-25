@@ -12,10 +12,7 @@
 /**
  * Initializes the pins as digital output
  */
-PumpRelay::PumpRelay(int rA, int rB1, int rB2) {
-  RELAYA = rA;
-  RELAYB1 = rB1;
-  RELAYB2 = rB2;
+PumpRelay::PumpRelay() {
   /**
    * Set PIN for monoblock pump as output
    * Initialize with HIGH so relay is open

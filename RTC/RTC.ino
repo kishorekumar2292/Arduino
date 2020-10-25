@@ -62,6 +62,9 @@ void printCurrentTime()
   currentTime = rtc.now();
   Serial.print("Now: ");
   printTime(currentTime);
+  char dow[7][3] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  Serial.print(" ");
+  Serial.print(clock.getDoW());
   Serial.println();
 }
 

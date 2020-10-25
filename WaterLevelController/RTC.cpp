@@ -12,45 +12,23 @@ DateTime RealTimeClock::getCurrentTime() {
   return rtc.now();
 }
 
-char* RealTimeClock::getDayOfWeek() {
-  char dow[7][4] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-  _dow = (char *) dow[dsmodule.getDoW()];
-  return _dow;
+String RealTimeClock::getDayOfWeek() {
+  String _dowStr[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+  return _dowStr[dsmodule.getDoW() - 1];
 }
     
-char* RealTimeClock::getDate(DateTime time) {
-  char months[12][4] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
-  int day = time.day();
-  _date_str[1] = numbers[day%10]; day /= 10;  _date_str[0] = numbers[day%10];
-  _date_str[2] = '.';
-  int mon = time.month()-1;
-  char *thisMonth = months[mon];
-  _date_str[3] = thisMonth[0]; _date_str[4] = thisMonth[1]; _date_str[5] = thisMonth[2];
-  _date_str[6] = '.';
-  int year = time.year();
-  _date_str[10] = numbers[year%10]; year /= 10; 
-  _date_str[9] = numbers[year%10]; year /= 10; 
-  _date_str[8] = numbers[year%10]; year /= 10; 
-  _date_str[7] = numbers[year%10]; 
-  return _date_str;
+String RealTimeClock::getDateStr(DateTime time) {
+  String months[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+  String _dtStr = String(String(time.day(),DEC) + "." + months[time.month() - 1] + "." + String(time.year(), DEC));
+  return _dtStr;
 }
 
-char* RealTimeClock::getTime(DateTime time) {
-  int hr = time.hour();
-  int mm = time.minute();
-  char mer[2];
-  if(hr < 13) {
-    mer[0] = 'a';
-    mer[1] = 'm';
-  }
-  if(hr > 12) {
-    hr -= 12;
-    mer[0] = 'p';
-    mer[1] = 'm';
-  }
-  _time_str[1] = numbers[hr%10]; hr /= 10; _time_str[0] = numbers[hr%10];
-  _time_str[2] = ':';
-  _time_str[4] = numbers[mm%10]; mm /= 10; _time_str[3] = numbers[mm%10];
-  _time_str[5] = mer[0]; _time_str[6] = mer[1];
-  return _time_str;
+String RealTimeClock::getTimeStr(DateTime time) {
+  String _tsStr = String(String(time.hour()>12?time.hour()-12:time.hour(),DEC) + ":" + String(time.minute(),DEC) + String(time.hour()<13?"am":"pm") + "");
+  return _tsStr;
+}
+
+String RealTimeClock::getTimeStampStr(DateTime dt) {
+  String _timeStamp = String(String(dt.hour(), DEC) + ":" + String(dt.minute(), DEC) + ":" + String(dt.second(), DEC) + " " + String(dt.day(), DEC) + "/" + String(dt.month(), DEC) + "/" + String(dt.year(), DEC));
+  return _timeStamp;
 }

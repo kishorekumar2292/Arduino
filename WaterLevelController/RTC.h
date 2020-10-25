@@ -12,9 +12,6 @@ class RealTimeClock {
     RTClib rtc;
     DS3231 dsmodule;
   public:
-    char _date_str[16] = {' '};
-    char _time_str[16] = {' '};
-    char *_dow;
     uint8_t degree[8] = {
       B00100,
       B01010,
@@ -28,9 +25,10 @@ class RealTimeClock {
 
     float getTemperature();
     DateTime getCurrentTime();
-    char* getDayOfWeek();    
-    char* getDate(DateTime time);
-    char* getTime(DateTime time);
+    String getDayOfWeek();    
+    String getDateStr(DateTime time);
+    String getTimeStr(DateTime time);
+    String getTimeStampStr(DateTime dt);
   private:
     const char numbers[11] = "0123456789";
 };
