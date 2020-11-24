@@ -26,9 +26,9 @@ int LiquidLevelSensor::getWaterLevel(int unit) {
   int analogVal = readWaterLevelSensor(unit);
   if(analogVal == 0)
     return LVLLO;
-  if(analogVal >= 100 && analogVal < 250)
+  if(analogVal >= 100 && analogVal < 200)
     return LVL25;
-  if(analogVal >= 250 && analogVal < 350)
+  if(analogVal >= 200 && analogVal < 350)
     return LVL50;
   if(analogVal >= 350 && analogVal < 450)
     return LVL75;

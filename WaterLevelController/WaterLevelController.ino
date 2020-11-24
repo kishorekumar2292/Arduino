@@ -39,6 +39,7 @@ void getBlueToothCommand() {
  * Serial for configuration through PC
  */
 void getSerialData() {
+  /*
   if(Serial && !serialconnected) {
     serialconnected = true;
     adminConsoleisActive = true;
@@ -79,6 +80,7 @@ void getSerialData() {
     if(adminConsoleisActive)
       printAdminConsoleMenu();
   }
+  */
 }
 /**
  * Repeatedly looks for the status of sensors and perform appropriate action
@@ -93,7 +95,6 @@ void monoblockPumpCheck() {
     tank1 = sensor.getWaterLevel(OHT1);
     tank1TS = rtc.getCurrentTime();
   }
-  
   /**
    * When PumpStateOn && ( tank1 == Full || sump == Empty)
    * Set AutoModeOn, PumpOff
@@ -341,15 +342,15 @@ void submersiblePumpStatus() {
 TimedAction monoblockPumpAction = TimedAction(100, monoblockPumpCheck);
 TimedAction submersiblePumpAction = TimedAction(100, submersiblePumpCheck);
 TimedAction bluetoothAction = TimedAction(100, getBlueToothCommand);
-TimedAction consoleAction = TimedAction(50, getSerialData);
+//TimedAction consoleAction = TimedAction(50, getSerialData);
 
 void setup() {
   /*Initializes BlueTooth serial*/
   BlueTooth.begin(9600);
   while(!BlueTooth) {}
   /*Initializes serial terminal*/
-  Serial.begin(9600);
-  while(!Serial) {}
+  //Serial.begin(9600);
+  //while(!Serial) {}
   /*Initializes LCD and display WELCOME message*/
   initLCD();
 
@@ -366,7 +367,7 @@ void loop() {
 
 void customDelayHandle(long duration) {
   for(int i=0; i<duration; i++) {
-    consoleAction.check();
+    //consoleAction.check();
     bluetoothAction.check();
     monoblockPumpAction.check();
     submersiblePumpAction.check();
@@ -504,7 +505,7 @@ void parseBTCommand(String command) {
 }
 
 void btPrintLevel(int level, DateTime timestamp) {
-  BlueTooth.print(String("Level=" + String(level,DEC) + ",StatusTS=" + rtc.getTimeStampStr(P2StartTS) + "\r"));
+  BlueTooth.print("Level=" + String(level,DEC) + ",StatusTS=" + rtc.getTimeStampStr(timestamp) + "\r");
 }
 
 void btPrintTS(DateTime start, DateTime stop) {
