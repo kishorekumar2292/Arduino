@@ -2,7 +2,6 @@
 #include "PumpRelay.h"
 #include "TouchSwitch.h"
 #include "LiquidLevelSensor.h"
-#include "AdminConsole.h"
 #include "Themes.h"
 #include "DS3231.h"
 
@@ -36,52 +35,83 @@ void getBlueToothCommand() {
   }
 }
 /**
- * Serial for configuration through PC
+ * Fail Safe defines maximum time taken (min) for each level to reach.
+ * When sensors fail to send data after the pump switches ON we safely
+ * OFF them to avoid water wastage. This is not an accurate time but a
+ * mere fail safe mechanism.
  */
-void getSerialData() {
-  /*
-  if(Serial && !serialconnected) {
-    serialconnected = true;
-    adminConsoleisActive = true;
-    printAdminConsoleMenu();
+int monoblockFailSafeTime[4] = {12,9,6,3};  //0->100:12min; 25->100:9min; 50->100:6min; 75->100:3min;
+long monoblockFailSafeLimit;
+int submersibleFailSafeTime[4] = {16,12,8,4}; //0->100:16min; 25->100:12min; 50->100:8min; 75->100:4min; 
+long submersibleFailSafeLimit;
+/**
+ * Should be called while pump is set to ON. It determines the total number of seconds it would take
+ * to reach the LVLHI from the current tank LEVEL.
+ */
+void monoblockSetLimit() {
+  switch (tank1) {
+    case LVLLO:
+      monoblockFailSafeLimit = monoblockFailSafeTime[0] * 60; //max_min x sec = total_seconds to run
+      break;
+    case LVL25:
+      monoblockFailSafeLimit = monoblockFailSafeTime[1] * 60; //max_min x sec = total_seconds to run
+      break;
+    case LVL50:
+      monoblockFailSafeLimit = monoblockFailSafeTime[2] * 60; //max_min x sec = total_seconds to run
+      break;
+    case LVL75:
+      monoblockFailSafeLimit = monoblockFailSafeTime[3] * 60; //max_min x sec = total_seconds to run
+      break;
   }
-  if(Serial.available() > 0 && adminConsoleisActive) {
-    int indata = Serial.read();
-    Serial.println(indata-48);
-    
-    switch(indata) {
-      case '1':
-        Serial.print(rtc.getTimeStampStr(rtc.getCurrentTime()));
-        Serial.print(", ");
-        Serial.print(rtc.getDayOfWeek());
-        Serial.print(" | ");
-        Serial.print(rtc.getTemperature());
-        Serial.println(" ^c");
-        Serial.println("");
-        break;
-      case '2':
-        Serial.println(String("Sump:" + String(sump) + "% | Tank:" + String(tank1) + "%"));
-        Serial.println(String("Pump Mode:" + String(P1Auto ? "Auto" : "Manual") + " | Pump Status:" + String(P1 == HIGH ? "ON" : "OFF")));
-        Serial.println("");
-        break;
-      case '3':
-        Serial.println(String("Tank:" + String(tank2) + "%"));
-        Serial.println(String("Pump Mode:" + String(P2Auto ? "Auto" : "Manual") + " | Pump Status:" + String(P2 == HIGH ? "ON" : "OFF")));
-        Serial.println("");
-        break;
-      case '4':
-        adminConsoleisActive = false;
-        Serial.println("Good Bye :)");
-        break;
-      default:
-        Serial.println("Invalid input!");
-        Serial.println("");
-    }
-    if(adminConsoleisActive)
-      printAdminConsoleMenu();
-  }
-  */
 }
+/**
+ * A TimedAction instance is created with this function to decrement the counter every 1000 millis 
+ */
+void monoblockDoTimer() {
+  monoblockFailSafeLimit = monoblockFailSafeLimit > 0 ? --monoblockFailSafeLimit : 0;
+}
+/**
+ * Checks if the timer expired to safely turn off the pump
+ */
+boolean isMonoblockRunLimitReached() {
+  return monoblockFailSafeLimit == 0 ? true : false;
+}
+TimedAction monoblockTimer = TimedAction(1000, monoblockDoTimer);
+
+/**
+ * Should be called while pump is set to ON. It determines the total number of seconds it would take
+ * to reach the LVLHI from the current tank LEVEL.
+ */
+void submersibleSetLimit() {
+  switch (tank2) {
+    case LVLLO:
+      submersibleFailSafeLimit = submersibleFailSafeTime[0] * 60; //max_min x sec = total_seconds to run
+      break;
+    case LVL25:
+      submersibleFailSafeLimit = submersibleFailSafeTime[1] * 60; //max_min x sec = total_seconds to run
+      break;
+    case LVL50:
+      submersibleFailSafeLimit = submersibleFailSafeTime[2] * 60; //max_min x sec = total_seconds to run
+      break;
+    case LVL75:
+      submersibleFailSafeLimit = submersibleFailSafeTime[3] * 60; //max_min x sec = total_seconds to run
+      break;
+  }
+}
+/**
+ * A TimedAction instance is created with this function to decrement the counter every 1000 millis 
+ */
+void submersibleDoTimer() {
+  submersibleFailSafeLimit = submersibleFailSafeLimit > 0 ? --submersibleFailSafeLimit : 0;
+}
+/**
+ * Checks if the timer expired to safely turn off the pump
+ */
+boolean isSubmersibleLimitReached() {
+  return submersibleFailSafeLimit == 0 ? true : false;
+}
+TimedAction submersibleTimer = TimedAction(1000, submersibleDoTimer);
+
 /**
  * Repeatedly looks for the status of sensors and perform appropriate action
  */
@@ -95,6 +125,8 @@ void monoblockPumpCheck() {
     tank1 = sensor.getWaterLevel(OHT1);
     tank1TS = rtc.getCurrentTime();
   }
+  if(P1 == HIGH)
+    monoblockTimer.check();
   /**
    * When PumpStateOn && ( tank1 == Full || sump == Empty)
    * Set AutoModeOn, PumpOff
@@ -103,8 +135,9 @@ void monoblockPumpCheck() {
    *  - OVERFLOW
    *  - SUMP EMPTY
    */
-  if(P1 == HIGH && (tank1 >= LVLHI || sump <= LVLLO)) {
+  if(P1 == HIGH && (isMonoblockRunLimitReached() || tank1 >= LVLHI || sump <= LVLLO)) {
     relay.monoblockPumpOff();
+    monoblockTimer.disable();
     P1StopTS = rtc.getCurrentTime();
     P1Auto = true;
     P1 = LOW;
@@ -122,6 +155,9 @@ void monoblockPumpCheck() {
      */
     if(tank1 > LVLLO && tank1 < LVL50 && P1 == LOW && sump > LVLLO) {
       relay.monoblockPumpOn();
+      monoblockSetLimit();
+      monoblockTimer.reset();
+      monoblockTimer.enable();
       P1StartTS = rtc.getCurrentTime();
       P1 = HIGH;
       touchswitch.setSwitch1(HIGH);
@@ -134,6 +170,7 @@ void monoblockPumpCheck() {
      */
     if(P1 == HIGH && touchswitch.getSwitchState(SW1) == LOW) {
       relay.monoblockPumpOff();
+      monoblockTimer.disable();
       P1StopTS = rtc.getCurrentTime();
       P1Auto = false;
       P1 = LOW;
@@ -149,6 +186,9 @@ void monoblockPumpCheck() {
     if(P1 == LOW && touchswitch.getSwitchState(SW1) == HIGH) {
       if(sump > LVLLO && tank1 < LVLHI) {
         relay.monoblockPumpOn();
+        monoblockSetLimit();
+        monoblockTimer.reset();
+        monoblockTimer.enable();
         P1StartTS = rtc.getCurrentTime();
         P1 = HIGH;
         touchswitch.setSwitch1(HIGH);
@@ -188,6 +228,9 @@ void monoblockPumpCheck() {
      */
     if(P1 == LOW && touchswitch.getSwitchState(SW1) == HIGH) {
       relay.monoblockPumpOn();
+      monoblockSetLimit();
+      monoblockTimer.reset();
+      monoblockTimer.enable();
       P1StartTS = rtc.getCurrentTime();
       P1 = HIGH;
       touchswitch.setSwitch1(HIGH);
@@ -196,6 +239,7 @@ void monoblockPumpCheck() {
     }
     if(P1 == HIGH && touchswitch.getSwitchState(SW1) == LOW) {
       relay.monoblockPumpOff();
+      monoblockTimer.disable();
       P1StartTS = rtc.getCurrentTime();
       P1 = LOW;
       touchswitch.setSwitch1(LOW);
@@ -213,12 +257,15 @@ void submersiblePumpCheck() {
     tank2 = sensor.getWaterLevel(OHT2);
     tank2TS = rtc.getCurrentTime();
   }
+  if(P2 == HIGH)
+    submersibleTimer.check();
   /**
    * When tank2 >= FULL && PumpStateOn
    * AUTOSTOP
    */
-  if(tank2 >= LVLHI && P2 == HIGH) {
+  if(P2 == HIGH && (isSubmersibleLimitReached() || tank2 >= LVLHI)) {
     relay.submersiblePumpOff();
+    submersibleTimer.disable();
     P2StopTS = rtc.getCurrentTime();
     P2Auto = true;
     P2 = LOW;
@@ -236,6 +283,9 @@ void submersiblePumpCheck() {
      */
     if(tank2 > LVLLO && tank2 < LVL50 && P2 == LOW) {
       relay.submersiblePumpOn();
+      submersibleSetLimit();
+      submersibleTimer.reset();
+      submersibleTimer.enable();
       P2StartTS = rtc.getCurrentTime();
       P2 = HIGH;
       touchswitch.setSwitch2(HIGH);
@@ -248,6 +298,7 @@ void submersiblePumpCheck() {
      */
     if(P2 == HIGH && touchswitch.getSwitchState(SW2) == LOW) {
       relay.submersiblePumpOff();
+      submersibleTimer.disable();
       P2StopTS = rtc.getCurrentTime();
       P2Auto = false;
       P2 = LOW;
@@ -263,6 +314,9 @@ void submersiblePumpCheck() {
     if(P2 == LOW && touchswitch.getSwitchState(SW2) == HIGH) {
       if(tank2 < LVLHI) {
         relay.submersiblePumpOn();
+        submersibleSetLimit();
+        submersibleTimer.reset();
+        submersibleTimer.enable();
         P2StopTS = rtc.getCurrentTime();
         P2Auto = false;
         P2 = HIGH;
@@ -293,6 +347,9 @@ void submersiblePumpCheck() {
      */
     if(P2 == LOW && touchswitch.getSwitchState(SW2) == HIGH) {
       relay.submersiblePumpOn();
+      submersibleSetLimit();
+      submersibleTimer.reset();
+      submersibleTimer.enable();
       P2StartTS = rtc.getCurrentTime();
       P2 = HIGH;
       touchswitch.setSwitch2(HIGH);
@@ -306,6 +363,7 @@ void submersiblePumpCheck() {
      */
     if(P2 == HIGH && touchswitch.getSwitchState(SW2) == LOW) {
       relay.submersiblePumpOff();
+      submersibleTimer.disable();
       P2StartTS = rtc.getCurrentTime();
       P2 = LOW;
       touchswitch.setSwitch2(LOW);
@@ -342,15 +400,11 @@ void submersiblePumpStatus() {
 TimedAction monoblockPumpAction = TimedAction(100, monoblockPumpCheck);
 TimedAction submersiblePumpAction = TimedAction(100, submersiblePumpCheck);
 TimedAction bluetoothAction = TimedAction(100, getBlueToothCommand);
-//TimedAction consoleAction = TimedAction(50, getSerialData);
 
 void setup() {
   /*Initializes BlueTooth serial*/
   BlueTooth.begin(9600);
   while(!BlueTooth) {}
-  /*Initializes serial terminal*/
-  //Serial.begin(9600);
-  //while(!Serial) {}
   /*Initializes LCD and display WELCOME message*/
   initLCD();
 
@@ -366,8 +420,7 @@ void loop() {
 }
 
 void customDelayHandle(long duration) {
-  for(int i=0; i<duration; i++) {
-    //consoleAction.check();
+  for(long i=0; i<duration; i++) {
     bluetoothAction.check();
     monoblockPumpAction.check();
     submersiblePumpAction.check();
@@ -399,7 +452,8 @@ void displayDateTimeTemp() {
   lcd.setCursor(14,1);
   lcd.write(byte(0));
   lcd.print("c");
-  delay(4000);
+  customDelayHandle(4000);
+  //delay(4000);
 }
 
 /**

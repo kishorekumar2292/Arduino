@@ -25,6 +25,7 @@ class RealTimeClock {
 
     float getTemperature();
     DateTime getCurrentTime();
+    
     String getDayOfWeek();    
     String getDateStr(DateTime time);
     String getTimeStr(DateTime time);
