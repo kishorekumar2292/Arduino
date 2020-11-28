@@ -15,13 +15,13 @@
 PumpRelay::PumpRelay() {
   /**
    * Set PIN for monoblock pump as output
-   * Initialize with HIGH so relay is open
+   * Initialize with LOW so relay is open
    */
   pinMode(RELAYA, OUTPUT);
   digitalWrite(RELAYA, LOW);
   /**
    * Set PINs for submersible pump as output
-   * Initialize both PINs as HIGH so relay is open
+   * Initialize both PINs as LOW so relay is open
    */
   pinMode(RELAYB1, OUTPUT);
   pinMode(RELAYB2, OUTPUT);
