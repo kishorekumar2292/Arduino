@@ -484,7 +484,7 @@ void setup() {
   while(!BlueTooth) {}
   /*Initializes LCD and display WELCOME message*/
   initLCD();
-  P1StartTS = P1StopTS = P2StartTS = P2StopTS = rtc.getCurrentTime();
+  P1StartTS = P1StopTS = P2StartTS = P2StopTS = sumpTS = tank1TS = tank2TS = rtc.getCurrentTime();
 }
 
 void loop() {
