@@ -18,10 +18,37 @@ void logonMusic() {
   }
 }
 
-void logoffMusic() {
-  for(int thisNote = 0; thisNote < 7; thisNote++) {
-    int noteduration = 1000 / winmusic2[thisNote][1];
-    tone(6, winmusic2[thisNote][0], noteduration);
+int errormusic[6][2] = {
+  {NOTE_C7, 3}, {NOTE_FS5, 2}
+};
+
+int notifymusic[6][2] = {
+  {NOTE_B5, 5}, {NOTE_DS7, 6}, {NOTE_G6, 5}, {NOTE_GS7, 6}
+};
+
+void startMusic() {
+  for(int thisNote = 0; thisNote < 4; thisNote++) {
+    int noteduration = 1000 / notifymusic[thisNote][1];
+    tone(6, notifymusic[thisNote][0], noteduration);
+    int pauseBetweenNotes = noteduration * 1.30;
+    delay(pauseBetweenNotes);
+    noTone(6);
+  }
+}
+
+void stopMusic() {
+  for(int thisNote = 3; thisNote >= 0; thisNote--) {
+    int noteduration = 1000 / notifymusic[thisNote][1];
+    tone(6, notifymusic[thisNote][0], noteduration);
+    int pauseBetweenNotes = noteduration * 1.30;
+    delay(pauseBetweenNotes);
+    noTone(6);
+  }
+}
+void errorMusic() {
+  for(int thisNote = 0; thisNote < 2; thisNote++) {
+    int noteduration = 1000 / errormusic[thisNote][1];
+    tone(6, errormusic[thisNote][0], noteduration);
     int pauseBetweenNotes = noteduration * 1.30;
     delay(pauseBetweenNotes);
     noTone(6);

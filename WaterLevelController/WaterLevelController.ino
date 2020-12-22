@@ -1,8 +1,8 @@
 #include "RTC.h"
+#include "Themes.h"
 #include "PumpRelay.h"
 #include "TouchSwitch.h"
 #include "LiquidLevelSensor.h"
-#include "Themes.h"
 #include "DS3231.h"
 
 #include <TimedAction.h>
@@ -17,12 +17,10 @@ TouchSwitch touchswitch;
 RealTimeClock rtc;
 PumpRelay relay;
 
-static int SIGLOCK=0;
-
-volatile byte P1 = LOW, P2 = LOW;
+volatile byte P1 = LOW, P2 = LOW, P1_prev = LOW, P2_prev = LOW, P1Blink, P2Blink;
 DateTime P1StartTS, P2StartTS, P1StopTS, P2StopTS;
 DateTime sumpTS, tank1TS, tank2TS;
-volatile boolean P1Auto = true, P2Auto = true;
+volatile boolean P1Auto = true, P2Auto = true, P1Error = false, P2Error = false;
 volatile int sump, tank1, tank2;
 String command, BTRESCODE="";
 
@@ -46,7 +44,7 @@ void readBlueToothCommand() {
       btPrintLevel(tank2, tank2TS);
     }
     else if(command == "?pump1") {
-      btPrintStatus(P1, P1Auto);
+      btPrintStatus(P1, P1Auto, P1Error);
     }
     else if(command == "?pump1TS") {
       btPrintTS(P1StartTS, P1StopTS);
@@ -76,7 +74,7 @@ void readBlueToothCommand() {
       BlueTooth.print("OK\r");
     }
     else if(command == "?pump2") {
-      btPrintStatus(P2, P2Auto);
+      btPrintStatus(P2, P2Auto, P2Error);
     }
     else if(command == "?pump2TS") {
       btPrintTS(P2StartTS, P2StopTS);
@@ -116,8 +114,8 @@ void btPrintLevel(int level, DateTime timestamp) {
 void btPrintTS(DateTime start, DateTime stop) {
   BlueTooth.print("StartTS=" + rtc.getTimeStampStr(start) + ",StopTS=" + rtc.getTimeStampStr(stop) + "\r");
 }
-void btPrintStatus(byte state, boolean mode) {
-  BlueTooth.print("State=" + String(state==HIGH?"ON":"OFF") + ",Mode=" + String(mode?"A":"M") + "\r");
+void btPrintStatus(byte state, boolean mode, boolean err) {
+  BlueTooth.print("State=" + String(state==HIGH?"ON":"OFF") + ",Mode=" + String(mode?"A":"M") + ",Error=" + String(err?"True":"False") + "\r");
 }
 /**
  * Fail Safe defines maximum time taken (min) for each level to reach.
@@ -125,9 +123,9 @@ void btPrintStatus(byte state, boolean mode) {
  * OFF them to avoid water wastage. This is not an accurate time but a
  * mere fail safe mechanism.
  */
-const int monoblockFailSafeTime[4] = {12,9,6,3};  //0->100:12min; 25->100:9min; 50->100:6min; 75->100:3min;
+const int monoblockFailSafeTime[4] = {3,3,3,3};  //0->25:3min; 25->50:3min; 50->75:3min; 75->100:3min;
 long monoblockFailSafeLimit;
-const int submersibleFailSafeTime[4] = {16,12,8,4}; //0->100:16min; 25->100:12min; 50->100:8min; 75->100:4min; 
+const int submersibleFailSafeTime[4] = {4,4,4,4}; //0->25:4min; 25->50:4min; 50->75:4min; 75->100:4min; 
 long submersibleFailSafeLimit;
 /**
  * Should be called while pump is set to ON. It determines the total number of seconds it would take
@@ -147,6 +145,8 @@ void monoblockSetLimit() {
     case LVL75:
       monoblockFailSafeLimit = monoblockFailSafeTime[3] * 60; //max_min x sec = total_seconds to run
       break;
+    default:
+      monoblockFailSafeLimit = 0; //In case of LVLHI sets to 0
   }
 }
 /**
@@ -181,6 +181,8 @@ void submersibleSetLimit() {
     case LVL75:
       submersibleFailSafeLimit = submersibleFailSafeTime[3] * 60; //max_min x sec = total_seconds to run
       break;
+    default:
+      submersibleFailSafeLimit = 0; //In case of LVLHI sets to 0
   }
 }
 /**
@@ -197,147 +199,169 @@ boolean isSubmersibleRunLimitReached() {
 }
 TimedAction submersibleTimer = TimedAction(1000, submersibleDoTimer);
 
+TimedAction monoblockPumpAction = TimedAction(100, monoblockPumpCheck);
+TimedAction submersiblePumpAction = TimedAction(100, submersiblePumpCheck);
+TimedAction bluetoothAction = TimedAction(100, readBlueToothCommand);
+TimedAction p1blinkAction = TimedAction(500, blinkLED1);
+TimedAction p2blinkAction = TimedAction(500, blinkLED2);
+
 /**
  * Repeatedly looks for the status of sensors and perform appropriate action
  */
 void monoblockPumpCheck() {
-  if(SIGLOCK==0) {
-    /*Acquiring lock to restrict other thread operation*/
-    SIGLOCK++;
-    
-    /*Read sensor values*/
-    if(sump != sensor.getWaterLevel(SUMP)) {
-      sump = sensor.getWaterLevel(SUMP);
-      sumpTS = rtc.getCurrentTime();
-    }
-    if(tank1 != sensor.getWaterLevel(OHT1)) {
-      tank1 = sensor.getWaterLevel(OHT1);
-      tank1TS = rtc.getCurrentTime();
-    }
-    if(P1 == HIGH)
-      monoblockTimer.check();
-    /**
-     * When PumpStateOn && ( tank1 == Full || sump == Empty)
-     * Set AutoModeOn, PumpOff
-     * 
-     * AUTOSTOP
-     *  - OVERFLOW
-     *  - SUMP EMPTY
+  /*Read sensor values*/
+  if(sump != sensor.getWaterLevel(SUMP)) {
+    sump = sensor.getWaterLevel(SUMP);
+    sumpTS = rtc.getCurrentTime();
+  }
+  if(tank1 != sensor.getWaterLevel(OHT1)) {
+    tank1 = sensor.getWaterLevel(OHT1);
+    monoblockSetLimit();
+    tank1TS = rtc.getCurrentTime();
+  }
+  if(P1 == HIGH)
+    monoblockTimer.check();
+  /**
+   * When PumpStateOn && ( tank1 == Full || sump == Empty)
+   * Set AutoModeOn, PumpOff
+   * 
+   * AUTOSTOP
+   *  - OVERFLOW
+   *  - SUMP EMPTY
+   */
+  if(P1 == HIGH && (isMonoblockRunLimitReached() || tank1 >= LVLHI || sump <= LVLLO)) {
+    touchswitch.setSwitch1(LOW);
+    stopMusic();
+    relay.monoblockPumpOff();
+    monoblockTimer.disable();
+    P1StopTS = rtc.getCurrentTime();
+    /*
+     * Switching to MANUAL mode [ERROR] in case limit not reached on time
      */
-    if(P1 == HIGH && (isMonoblockRunLimitReached() || tank1 >= LVLHI || sump <= LVLLO)) {
+    if(isMonoblockRunLimitReached()) {
+      P1Auto = false;
+      P1Error = true;
+      p1blinkAction.reset();
+      p1blinkAction.enable();
+    }
+    else {
+      P1Auto = true;
+      P1Error = false;
+    }
+    P1 = LOW;
+  }
+  /**
+   * Functions when Auto Mode ON
+   */
+  if(P1Auto) {
+    /**
+     * When tank1 between OnThreshold && PumpStateOff && AutoModeOn && Sump more than empty
+     * Set PumpOn
+     * 
+     * AUTOSTART
+     */
+    if(tank1 > LVLLO && tank1 < LVL50 && P1 == LOW && sump > LVLLO) {
+      touchswitch.setSwitch1(HIGH);
+      startMusic();
+      relay.monoblockPumpOn();
+      monoblockSetLimit();
+      monoblockTimer.reset();
+      monoblockTimer.enable();
+      P1StartTS = rtc.getCurrentTime();
+      P1 = HIGH;
+    }
+    /**
+     * When PumpStateOn && TouchSwitchLow && AutoModeOn
+     * Set AutoModeOff, PumpOff
+     * 
+     * MANUALSTOP
+     */
+    if(P1 == HIGH && touchswitch.getSwitchState(SW1) == LOW) {
       touchswitch.setSwitch1(LOW);
+      stopMusic();
       relay.monoblockPumpOff();
       monoblockTimer.disable();
       P1StopTS = rtc.getCurrentTime();
-      P1Auto = true;
+      P1Auto = false;
       P1 = LOW;
+      BTRESCODE = "OK";
     }
     /**
-     * Functions when Auto Mode ON
+     * When PumpStateOff && TouchSwitchHigh
+     * Set the PumpStateOn, Disable AutoMode
+     * 
+     * MANUALSTART
      */
-    if(P1Auto) {
-      /**
-       * When tank1 between OnThreshold && PumpStateOff && AutoModeOn && Sump more than empty
-       * Set PumpOn
-       * 
-       * AUTOSTART
-       */
-      if(tank1 > LVLLO && tank1 < LVL50 && P1 == LOW && sump > LVLLO) {
+    if(P1 == LOW && touchswitch.getSwitchState(SW1) == HIGH) {
+      if(sump > LVLLO && tank1 < LVLHI) {
         touchswitch.setSwitch1(HIGH);
+        P1Error = false;
+        p1blinkAction.disable();
+        startMusic();
         relay.monoblockPumpOn();
         monoblockSetLimit();
         monoblockTimer.reset();
         monoblockTimer.enable();
         P1StartTS = rtc.getCurrentTime();
         P1 = HIGH;
-      }
-      /**
-       * When PumpStateOn && TouchSwitchLow && AutoModeOn
-       * Set AutoModeOff, PumpOff
-       * 
-       * MANUALSTOP
-       */
-      if(P1 == HIGH && touchswitch.getSwitchState(SW1) == LOW) {
-        touchswitch.setSwitch1(LOW);
-        relay.monoblockPumpOff();
-        monoblockTimer.disable();
-        P1StopTS = rtc.getCurrentTime();
         P1Auto = false;
-        P1 = LOW;
         BTRESCODE = "OK";
-      }
-      /**
-       * When PumpStateOff && TouchSwitchHigh
-       * Set the PumpStateOn, Disable AutoMode
-       * 
-       * MANUALSTART
-       */
-      if(P1 == LOW && touchswitch.getSwitchState(SW1) == HIGH) {
-        if(sump > LVLLO && tank1 < LVLHI) {
-          touchswitch.setSwitch1(HIGH);
-          relay.monoblockPumpOn();
-          monoblockSetLimit();
-          monoblockTimer.reset();
-          monoblockTimer.enable();
-          P1StartTS = rtc.getCurrentTime();
-          P1 = HIGH;
-          P1Auto = false;
-          BTRESCODE = "OK";
-        } 
-        else if (sump <= LVLLO) {
-          lcd.clear();
-          lcd.setCursor(0,0);
-          lcd.print("Sump is empty!");
-          lcd.setCursor(0,1);
-          lcd.print("Can't start pump");
-          P1 = LOW;
-          touchswitch.setSwitch1(LOW);
-          BTRESCODE = "NOTOK:SUMP EMPTY";
-        }
-        else if (tank1 >= LVLHI) {
-          lcd.clear();
-          lcd.setCursor(0,0);
-          lcd.print("Tank is full!");
-          lcd.setCursor(0,1);
-          lcd.print("Can't start pump");
-          P1 = LOW;
-          touchswitch.setSwitch1(LOW);
-          BTRESCODE = "NOTOK:TANK FULL";
-        }
-      }  
-    }
-    /**
-     * When AutoModeOff
-     * Display message: Touch SW1 to reset AutoModeOn
-     */
-    else {
-      /**
-       * When PumpStateOff && touch switch 1 is triggered
-       * Reset AutoModeOn
-       */
-      if(P1 == LOW && touchswitch.getSwitchState(SW1) == HIGH) {
-        touchswitch.setSwitch1(HIGH);
-        relay.monoblockPumpOn();
-        monoblockSetLimit();
-        monoblockTimer.reset();
-        monoblockTimer.enable();
-        P1StartTS = rtc.getCurrentTime();
-        P1 = HIGH;      
-        P1Auto = true;
-        BTRESCODE = "OK";
-      }
-      if(P1 == HIGH && touchswitch.getSwitchState(SW1) == LOW) {
-        relay.monoblockPumpOff();
-        monoblockTimer.disable();
-        P1StartTS = rtc.getCurrentTime();
+      } 
+      else if (sump <= LVLLO) {
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Sump is empty!");
+        lcd.setCursor(0,1);
+        lcd.print("Can't start pump");
         P1 = LOW;
         touchswitch.setSwitch1(LOW);
-        P1Auto = true;
-        BTRESCODE = "OK";
+        BTRESCODE = "NOTOK:SUMP EMPTY";
       }
+      else if (tank1 >= LVLHI) {
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Tank is full!");
+        lcd.setCursor(0,1);
+        lcd.print("Can't start pump");
+        P1 = LOW;
+        touchswitch.setSwitch1(LOW);
+        BTRESCODE = "NOTOK:TANK FULL";
+      }
+    }  
+  }
+  /**
+   * When AutoModeOff
+   * Display message: Touch SW1 to reset AutoModeOn
+   */
+  else {
+    /**
+     * When PumpStateOff && touch switch 1 is triggered
+     * Reset AutoModeOn
+     */
+    if(P1 == LOW && touchswitch.getSwitchState(SW1) == HIGH) {
+      touchswitch.setSwitch1(HIGH);
+      P1Error = false;
+      p1blinkAction.disable();
+      startMusic();
+      relay.monoblockPumpOn();
+      monoblockSetLimit();
+      monoblockTimer.reset();
+      monoblockTimer.enable();
+      P1StartTS = rtc.getCurrentTime();
+      P1 = HIGH;      
+      P1Auto = true;
+      BTRESCODE = "OK";
     }
-    /*Releasing lock for other threads*/
-    SIGLOCK--;
+    if(P1 == HIGH && touchswitch.getSwitchState(SW1) == LOW) {
+      touchswitch.setSwitch1(LOW);
+      stopMusic();
+      relay.monoblockPumpOff();      
+      monoblockTimer.disable();
+      P1StopTS = rtc.getCurrentTime();
+      P1 = LOW;      
+      P1Auto = true;
+      BTRESCODE = "OK";
+    }
   }
 }
 
@@ -345,143 +369,168 @@ void monoblockPumpCheck() {
  * Repeatedly looks for the status of sensors and perform appropriate action
  */
 void submersiblePumpCheck() {
-  if(SIGLOCK==0) {
-    /*Acquiring lock to restrict other thread operation*/
-    SIGLOCK++;
-
-    /*Read sensor values*/
-    if(tank2 != sensor.getWaterLevel(OHT2)) {
-      tank2 = sensor.getWaterLevel(OHT2);
-      tank2TS = rtc.getCurrentTime();
-    }
-    if(P2 == HIGH)
-      submersibleTimer.check();
-    /**
-     * When tank2 >= FULL && PumpStateOn
-     * AUTOSTOP
+  /*Read sensor values*/
+  if(tank2 != sensor.getWaterLevel(OHT2)) {
+    tank2 = sensor.getWaterLevel(OHT2);
+    submersibleSetLimit();
+    tank2TS = rtc.getCurrentTime();
+  }
+  if(P2 == HIGH)
+    submersibleTimer.check();
+  /**
+   * When tank2 >= FULL && PumpStateOn
+   * AUTOSTOP
+   */
+  if(P2 == HIGH && (isSubmersibleRunLimitReached() || tank2 >= LVLHI)) {
+    touchswitch.setSwitch2(LOW);
+    stopMusic();
+    relay.submersiblePumpOff();
+    submersibleTimer.disable();
+    P2StopTS = rtc.getCurrentTime();
+    /*
+     * Switching to MANUAL mode [ERROR] in case limit not reached on time
      */
-    if(P2 == HIGH && (isSubmersibleRunLimitReached() || tank2 >= LVLHI)) {
+    if(isSubmersibleRunLimitReached()) {
+      P2Auto = false;
+      P2Error = true;
+      p2blinkAction.reset();
+      p2blinkAction.enable();
+    }
+    else {
+      P2Auto = true;
+      P2Error = false;
+    }
+    P2 = LOW;
+  }
+  /**
+   * When AUTOMODEON
+   */
+  if(P2Auto) {
+    /**
+     * When tank2 <= OnThreshold && PumpStateOff
+     * Set PumpOn
+     * 
+     * AUTOSTART
+     */
+    if(tank2 > LVLLO && tank2 < LVL50 && P2 == LOW) {
+      touchswitch.setSwitch2(HIGH);
+      startMusic();
+      relay.submersiblePumpOn();
+      submersibleSetLimit();
+      submersibleTimer.reset();
+      submersibleTimer.enable();
+      P2StartTS = rtc.getCurrentTime();
+      P2 = HIGH;      
+    }
+    /**
+     * When PumpStateOn && TouchSwitchLow
+     * Set AutoModeOff, PumpOff
+     * 
+     * MANUALSTOP
+     */
+    if(P2 == HIGH && touchswitch.getSwitchState(SW2) == LOW) {
       touchswitch.setSwitch2(LOW);
+      stopMusic();
       relay.submersiblePumpOff();
       submersibleTimer.disable();
       P2StopTS = rtc.getCurrentTime();
-      P2Auto = true;
+      P2Auto = false;
       P2 = LOW;
+      BTRESCODE = "OK";
     }
     /**
-     * When AUTOMODEON
+     * When PumpStateOff && TouchSwitchHigh
+     * Set AutoModeOff, PumpOn
+     * 
+     * MANUALSTART
      */
-    if(P2Auto) {
-      /**
-       * When tank2 <= OnThreshold && PumpStateOff
-       * Set PumpOn
-       * 
-       * AUTOSTART
-       */
-      if(tank2 > LVLLO && tank2 < LVL50 && P2 == LOW) {
+    if(P2 == LOW && touchswitch.getSwitchState(SW2) == HIGH) {
+      if(tank2 < LVLHI) {
         touchswitch.setSwitch2(HIGH);
+        P2Error = false;
+        p2blinkAction.disable();
+        startMusic();
         relay.submersiblePumpOn();
         submersibleSetLimit();
         submersibleTimer.reset();
         submersibleTimer.enable();
         P2StartTS = rtc.getCurrentTime();
-        P2 = HIGH;      
-      }
-      /**
-       * When PumpStateOn && TouchSwitchLow
-       * Set AutoModeOff, PumpOff
-       * 
-       * MANUALSTOP
-       */
-      if(P2 == HIGH && touchswitch.getSwitchState(SW2) == LOW) {
-        touchswitch.setSwitch2(LOW);
-        relay.submersiblePumpOff();
-        submersibleTimer.disable();
-        P2StopTS = rtc.getCurrentTime();
         P2Auto = false;
+        P2 = HIGH;        
+        BTRESCODE = "OK";
+      }
+      else {
+        lcd.clear();
+        lcd.setCursor(0,0);
+        lcd.print("Tank is full!");
+        lcd.setCursor(0,1);
+        lcd.print("Can't start pump");
         P2 = LOW;
-        BTRESCODE = "OK";
-      }
-      /**
-       * When PumpStateOff && TouchSwitchHigh
-       * Set AutoModeOff, PumpOn
-       * 
-       * MANUALSTART
-       */
-      if(P2 == LOW && touchswitch.getSwitchState(SW2) == HIGH) {
-        if(tank2 < LVLHI) {
-          touchswitch.setSwitch2(HIGH);
-          relay.submersiblePumpOn();
-          submersibleSetLimit();
-          submersibleTimer.reset();
-          submersibleTimer.enable();
-          P2StopTS = rtc.getCurrentTime();
-          P2Auto = false;
-          P2 = HIGH;        
-          BTRESCODE = "OK";
-        }
-        else {
-          lcd.clear();
-          lcd.setCursor(0,0);
-          lcd.print("Tank is full!");
-          lcd.setCursor(0,1);
-          lcd.print("Can't start pump");
-          P2 = LOW;
-          touchswitch.setSwitch2(LOW);
-          BTRESCODE = "NOTOK:TANK FULL";
-        }
-      }
-    }  
-    /**
-     * When AutoModeOff
-     * Display message: Touch SW2 to reset AutoModeOn
-     */
-    else {
-      /**
-       * When PumpStateOff && touch switch 2 is HIGH
-       * AutoModeOn
-       * PumpOn
-       */
-      if(P2 == LOW && touchswitch.getSwitchState(SW2) == HIGH) {
-        touchswitch.setSwitch2(HIGH);
-        relay.submersiblePumpOn();
-        submersibleSetLimit();
-        submersibleTimer.reset();
-        submersibleTimer.enable();
-        P2StartTS = rtc.getCurrentTime();
-        P2 = HIGH;      
-        P2Auto = true;
-        BTRESCODE = "OK";
-      }
-      /**
-       * When PumpStateOn && touch switch 2 is LOW
-       * AutoModeOn
-       * PumpOff
-       */
-      if(P2 == HIGH && touchswitch.getSwitchState(SW2) == LOW) {
         touchswitch.setSwitch2(LOW);
-        relay.submersiblePumpOff();
-        submersibleTimer.disable();
-        P2StartTS = rtc.getCurrentTime();
-        P2 = LOW;      
-        P2Auto = true;
-        BTRESCODE = "OK";
+        BTRESCODE = "NOTOK:TANK FULL";
       }
     }
-  
-    /*Releasing lock for other threads*/
-    SIGLOCK--;
+  }  
+  /**
+   * When AutoModeOff
+   * Display message: Touch SW2 to reset AutoModeOn
+   */
+  else {
+    /**
+     * When PumpStateOff && touch switch 2 is HIGH
+     * AutoModeOn
+     * PumpOn
+     */
+    if(P2 == LOW && touchswitch.getSwitchState(SW2) == HIGH) {
+      touchswitch.setSwitch2(HIGH);
+      P2Error = false;
+      p2blinkAction.disable();
+      startMusic();
+      relay.submersiblePumpOn();
+      submersibleSetLimit();
+      submersibleTimer.reset();
+      submersibleTimer.enable();
+      P2StartTS = rtc.getCurrentTime();
+      P2 = HIGH;      
+      P2Auto = true;
+      BTRESCODE = "OK";
+    }
+    /**
+     * When PumpStateOn && touch switch 2 is LOW
+     * AutoModeOn
+     * PumpOff
+     */
+    if(P2 == HIGH && touchswitch.getSwitchState(SW2) == LOW) {
+      touchswitch.setSwitch2(LOW);
+      stopMusic();
+      relay.submersiblePumpOff();
+      submersibleTimer.disable();
+      P2StopTS = rtc.getCurrentTime();
+      P2 = LOW;      
+      P2Auto = true;
+      BTRESCODE = "OK";
+    }
   }
 }
 
-TimedAction monoblockPumpAction = TimedAction(100, monoblockPumpCheck);
-TimedAction submersiblePumpAction = TimedAction(100, submersiblePumpCheck);
-TimedAction bluetoothAction = TimedAction(100, readBlueToothCommand);
+void blinkLED1() {
+  P1Blink = !P1Blink;
+  digitalWrite(LED1, P1Blink);
+}
+
+void blinkLED2() {
+  P2Blink = !P2Blink;
+  digitalWrite(LED2, P2Blink);
+}
 
 void setup() {
   /*Initializes BlueTooth serial*/
   BlueTooth.begin(9600);
   while(!BlueTooth) {}
+  
+  p1blinkAction.disable();
+  p2blinkAction.disable();
+  
   /*Initializes LCD and display WELCOME message*/
   initLCD();
   P1StartTS = P1StopTS = P2StartTS = P2StopTS = sumpTS = tank1TS = tank2TS = rtc.getCurrentTime();
@@ -493,6 +542,12 @@ void loop() {
   monoblockPumpStatus();
   boreWaterStatus();  
   submersiblePumpStatus();
+  playErrorTone();
+}
+
+void playErrorTone() {
+  if(P1Error || P2Error) 
+    errorMusic();
 }
 
 void customDelayHandle(long duration) {
@@ -500,6 +555,8 @@ void customDelayHandle(long duration) {
     bluetoothAction.check();
     monoblockPumpAction.check();
     submersiblePumpAction.check();
+    p1blinkAction.check();
+    p2blinkAction.check();
     delay(1);
   }
 }
@@ -552,7 +609,7 @@ void monoblockPumpStatus() {
     lcd.setCursor(0,1);
     lcd.print(String("Pump:" + String(P1==HIGH?"ON  ":"OFF")));
     lcd.setCursor(10,1);
-    lcd.print(String("Mode:" + String(P1Auto?"A":"M")));
+    lcd.print(String("Mode:" + String(P1Auto?"A":P1Error?"E":"M")));
     customDelayHandle(300);
   }
 }
@@ -576,7 +633,7 @@ void submersiblePumpStatus() {
     lcd.setCursor(0,1);
     lcd.print(String("Pump:" + String(P2==HIGH?"ON  ":"OFF")));
     lcd.setCursor(10,1);
-    lcd.print(String("Mode:" + String(P2Auto?"A":"M")));
+    lcd.print(String("Mode:" + String(P2Auto?"A":P2Error?"E":"M")));
     customDelayHandle(300);
   }
 }
