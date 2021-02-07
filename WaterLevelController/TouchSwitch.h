@@ -8,6 +8,7 @@
 #ifndef TouchSwitch_h
 #define TouchSwitch_h
 #include <Arduino.h>
+#include <TimedAction.h>
 
 #define SW1 2
 #define SW2 3
